@@ -1,0 +1,53 @@
+name: post-messages
+
+# Triggers:
+#   - any push to main/master that touches messages/** (the typical case:
+#     the browser client just committed a new message)
+#   - manual workflow_dispatch (used to retry partial failures)
+#
+# The job re-commits messages/ with the [skip ci] tag so its own commits
+# do not trigger the workflow again.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'messages/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snarkysyndo-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Post pending messages
+        env:
+          MASTODON_INSTANCE: ${{ secrets.MASTODON_INSTANCE }}
+          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
+          BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+        run: uv run action/post_messages.py
+
+      - name: Commit status updates
+        run: |
+          if [ -z "$(git status --porcelain messages/)" ]; then
+            echo "no status updates to commit"
+            exit 0
+          fi
+          git config user.name "snarkysyndo-bot"
+          git config user.email "snarkysyndo-bot@users.noreply.github.com"
+          git add messages/
+          git commit -m "Update post status [skip ci]"
+          git push

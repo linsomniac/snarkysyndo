@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>snarkysyndo</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>snarkysyndo</h1>
+  <div class="header-actions">
+    <button type="button" id="refresh-btn" class="ghost">Refresh</button>
+    <button type="button" id="settings-btn" class="ghost">Settings</button>
+  </div>
+</header>
+
+<main>
+  <section id="compose-section" hidden>
+    <form id="compose-form">
+      <textarea
+        id="compose-text"
+        rows="4"
+        maxlength="300"
+        placeholder="What are you posting today?"
+        autofocus></textarea>
+      <div class="compose-row">
+        <span id="char-count" class="muted">0 / 300</span>
+        <button type="submit" id="post-btn">Post</button>
+      </div>
+    </form>
+    <div id="compose-status" class="status" hidden></div>
+  </section>
+
+  <section id="timeline-section" hidden>
+    <h2>Timeline</h2>
+    <div id="timeline-list">
+      <p class="muted">Loading…</p>
+    </div>
+  </section>
+
+  <section id="onboarding" hidden>
+    <h2>Welcome</h2>
+    <p>Open <strong>Settings</strong> in the top-right and paste in:</p>
+    <ul>
+      <li>a fine-grained GitHub PAT scoped to your snarkysyndo repo with <code>Contents: write</code></li>
+      <li>the repo owner and name</li>
+      <li>the default branch (usually <code>main</code>)</li>
+    </ul>
+    <p>The PAT is kept only in this browser's <code>localStorage</code>; nothing is sent anywhere except <code>api.github.com</code>.</p>
+  </section>
+</main>
+
+<dialog id="settings-dialog">
+  <form id="settings-form" method="dialog">
+    <h2>Settings</h2>
+    <label>
+      <span>GitHub PAT</span>
+      <input type="password" id="pat-input" autocomplete="off" spellcheck="false" required>
+      <small class="muted">Fine-grained, repo-scoped, with <code>Contents: write</code>.</small>
+    </label>
+    <label>
+      <span>Repo owner</span>
+      <input type="text" id="owner-input" autocomplete="off" spellcheck="false" required>
+    </label>
+    <label>
+      <span>Repo name</span>
+      <input type="text" id="repo-input" autocomplete="off" spellcheck="false" required>
+    </label>
+    <label>
+      <span>Branch</span>
+      <input type="text" id="branch-input" autocomplete="off" spellcheck="false" value="main" required>
+    </label>
+    <div id="settings-status" class="status" hidden></div>
+    <div class="dialog-actions">
+      <button type="button" id="settings-test">Test</button>
+      <button type="button" id="settings-cancel" class="ghost">Cancel</button>
+      <button type="submit" id="settings-save">Save</button>
+    </div>
+    <details>
+      <summary>Forget settings</summary>
+      <p>Clears the PAT and repo info from this browser.</p>
+      <button type="button" id="settings-forget" class="danger">Forget</button>
+    </details>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

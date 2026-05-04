@@ -70,7 +70,8 @@ deploy your client will live at
 
 ### 6. Mint a fine-grained PAT for the browser client
 
-GitHub: **Settings → Developer settings → Personal access tokens →
+GitHub: **Settings (under your Profiler picture, upper right) →
+Developer settings → Personal access tokens →
 Fine-grained tokens → Generate new token**.
 
 - **Resource owner**: yourself (or the org that owns the repo)

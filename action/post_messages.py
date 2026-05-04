@@ -295,3 +295,7 @@ def main() -> int:
     # Partial failures are not a hard error — we want the workflow to commit
     # the recorded errors so a follow-up run can retry the missing side.
     return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

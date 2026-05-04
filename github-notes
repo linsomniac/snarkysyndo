@@ -1,0 +1,102 @@
+Let me check the current status of the SPA preview for GitHub Apps:# Yes, this is very doable — here's the full picture
+
+## The core technical fact
+
+GitHub's REST API (`api.github.com`) supports CORS with `Access-Control-Allow-Origin: *` and the necessary preflight machinery, so a browser-resident JS app — including one served from `github.io` — can call essentially any REST endpoint directly with a bearer token. GitHub explicitly documents this: "The REST API supports cross-origin resource sharing (CORS) for AJAX requests from any origin," with `Access-Control-Allow-Methods: GET, POST, PATCH, PUT, DELETE` and `Access-Control-Allow-Headers` including `Authorization`.
+
+So the *using-the-token* half is trivial. The interesting question is the *getting-the-token* half — which is where each option below differs.
+
+## What you can do once you have a token
+
+All of these are plain HTTPS calls from the browser to `api.github.com`:
+
+- **Add or update a single file**: `PUT /repos/{owner}/{repo}/contents/{path}` (works in one round trip; takes base64-encoded content).
+- **Make a multi-file commit**: the Git Data API — create blobs (`POST /git/blobs`), build a tree (`POST /git/trees`), make a commit (`POST /git/commits`), then advance a ref (`PATCH /git/refs/heads/...`).
+- **Create a tag** (which can trigger a workflow that listens on `push: tags:`): `POST /repos/{owner}/{repo}/git/refs` with `ref: refs/tags/vX.Y.Z`.
+- **Trigger a workflow directly via `workflow_dispatch`**: `POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches` — "You can use this endpoint to manually trigger a GitHub Actions workflow run. You can replace workflow_id with the workflow file name. For example, you could use main.yaml. You must configure your GitHub Actions workflow to run when the workflow_dispatch webhook event occurs."
+- **Trigger a workflow via `repository_dispatch`** (a custom event with arbitrary JSON payload): `POST /repos/{owner}/{repo}/dispatches` with `{"event_type": "your-event-name", "client_payload": {...}}`. The workflow needs `on: repository_dispatch:` (optionally with `types:` to filter).
+
+### Token permissions you'll need
+
+For a fine-grained PAT (or a GitHub App user-to-server token):
+
+| Operation | Fine-grained permission | Classic scope |
+|---|---|---|
+| Read repo contents | Contents: read, Metadata: read | `repo` (or `public_repo`) |
+| Add/update files, create branches/tags | Contents: write | `repo` |
+| `repository_dispatch` | Contents: read/write | `repo` |
+| `workflow_dispatch` | Contents: read/write (yes — the docs are slightly misleading here; the community confirmed this) | `repo` (and historically `workflow` for editing workflow files themselves) |
+| Edit `.github/workflows/*.yml` files | Workflows: write | `workflow` |
+
+One useful debugging tip: "To help you choose the correct permissions, you will receive the X-Accepted-GitHub-Permissions header in the REST API response. The header will tell you what permissions are required in order to access the endpoint." So if you're not sure, hit the endpoint with a near-empty token and read the header it returns.
+
+## The catch: getting the token into the browser
+
+Here's the wrinkle. While `api.github.com` is CORS-friendly, the OAuth login endpoints on `github.com` are **not**. GitHub's own docs confirm this for the web flow: "CORS pre-flight requests (OPTIONS) are not supported at this time." A GitHub staff response in the long-running PKCE feature thread (mid-2025) is even more explicit: "We still have to add support for CORS on the token endpoint unfortunately. We are working on it though. For the client secret, yes, our implementation always requires the client secret as we don't yet distinguish between public clients and confidential clients. So at this time, native apps and SPA type apps need to include their client secret in the redemption."
+
+This rules out two things you might otherwise reach for:
+
+1. **A pure-browser OAuth web flow** — the `code → access_token` exchange POST to `github.com/login/oauth/access_token` will be blocked by the browser, *and* it requires the client secret, which you can't safely embed in static JS anyway.
+2. **A pure-browser device flow** — the device flow doesn't need a client secret (which makes it tempting), but the polling endpoint is on `github.com` not `api.github.com` and has the same no-CORS problem. Andrea Zonca's writeup spells this out: "GitHub does not allow direct calls to the device flow from the browser for security reasons. The device flow requires a server process to handle the communication with GitHub's API securely."
+
+GitHub *did* roll out PKCE support in July 2025 ("PKCE (Proof Key for Code Exchange) is now supported and recommended for user authentication in OAuth and GitHub Apps... GitHub is not requiring PKCE for any authentication flow at this time, as GitHub does not distinguish between public and confidential clients") — but as the staff comment above notes, until they (a) add CORS to the token endpoint and (b) stop requiring the client secret, PKCE alone doesn't get you to a backend-free SPA. There is a roadmap item for proper SPA support that explicitly addresses both: "Clients must use the PKCE extension when requesting and redeeming the authorization code. Clients must not use a client secret when redeeming the authorization code." When that ships in GA you'll have a clean, backend-free path; until then, you have three practical options.
+
+## Option 1 — User-supplied PAT (simplest, recommended for your use case)
+
+The user creates a fine-grained PAT scoped *only* to the target repo, with the minimal permissions above, and pastes it into your web app. Store it in `localStorage` (or `sessionStorage` for paranoia). Done.
+
+This is a perfectly legitimate approach. It's how Decap CMS' "test repo backend," many Jupyter/Observable-style notebook tools, and various "edit-this-config-from-the-browser" utilities work. It's especially appropriate when:
+
+- The audience is "you and a couple of teammates" (which fits your sysadmin profile).
+- You don't want to operate any server-side component at all.
+- Users are technical enough to generate a PAT.
+
+Fine-grained PATs are well-suited for this because, unlike classic PATs, "they only have access to the repositories or organizations that they explicitly are granted access to. They can even be targeted at a single repository in an organization." So a leaked token only compromises the one repo, not the whole account.
+
+A small UX nicety: validate the PAT on input by hitting `GET /user` and confirming the `X-OAuth-Scopes` / response succeeds, and show the user which repo and permissions they've granted. Octokit.js (`@octokit/rest`) is a one-import client that works fine in the browser with ESM — there's a CDN build at `https://esm.sh/@octokit/rest`.
+
+## Option 2 — OAuth App or GitHub App + a tiny token-exchange proxy
+
+If you want users to "click sign in with GitHub" instead of pasting a token, you need a server somewhere — but it can be *very* tiny: it does literally one thing, the `code → access_token` exchange. After that, the browser holds the token and talks to `api.github.com` directly.
+
+The classic tool for this is `prose/gatekeeper` (a Heroku-style proxy whose entire job is OAuth code exchange). For modern hosting, a Cloudflare Worker (free tier), AWS Lambda + Function URL, Vercel/Netlify function, or a $0 Render service all work. Andrea Zonca's writeup walks through deploying the device-flow variant on Render: "Make sure you enable the Device flow in the OAuth Apps settings. Get the Client ID, we do not need a secret for the device flow... Create a new web service on Render.com. Connect your forked repository to the new web service."
+
+Architecture for the **web flow** version:
+
+1. Browser redirects to `https://github.com/login/oauth/authorize?client_id=...&scope=...&state=...&redirect_uri=https://you.github.io/callback`.
+2. GitHub redirects user back to your `github.io` page with `?code=...`.
+3. JS sends the code to your proxy: `POST https://your-proxy.workers.dev/exchange { code }`.
+4. Proxy holds the `client_secret`, calls `https://github.com/login/oauth/access_token`, returns the token.
+5. JS stores token, calls `api.github.com` for everything else.
+
+Use a **GitHub App** rather than an OAuth App if you can — finer-grained permissions, per-repo install, expiring tokens with refresh, and you can ask for "Contents: write" on a single repo rather than the broad `repo` classic scope. "By default, user access tokens expires after 8 hours. If you receive a user access token with an expiration, you will also receive a refresh token. The refresh token expire after 6 months."
+
+## Option 3 — Wait for / opt into the GitHub Apps SPA preview
+
+If you specifically want the modern, no-backend, PKCE-with-no-client-secret path, that's on GitHub's roadmap as a GitHub Apps client type. The roadmap item (`github/roadmap#1153`) describes exactly your use case: "Single page apps (SPAs) can use GitHub authentication to sign in users, following the standards laid out in the draft RFC for Browser-Based Apps... Clients must not use a client secret when redeeming the authorization code... Refresh tokens can only be used to get a new access token for a limited time, possibly as short as 24 hours." Worth subscribing to that issue. As of the writing of this answer it had not yet GA'd.
+
+## Concrete recommendation for your situation
+
+Given your context (RealGo sysadmin work, internal tooling, small ops team, comfortable with Ansible/PATs already), **Option 1 (user-supplied fine-grained PAT)** is almost certainly the right tradeoff. Zero infrastructure, zero ongoing cost, no client_secret to rotate, and the security properties are good as long as you store the token only in the user's browser.
+
+Skeleton of the workflow it enables:
+
+1. User pastes PAT, you stash it in `localStorage`.
+2. User fills out a form in your app.
+3. JS calls `PUT /repos/statshed/whatever/contents/items/2026-05-03-sean.json` with the form data, base64-encoded.
+4. JS optionally calls `POST /repos/statshed/whatever/dispatches` with `{"event_type": "new-item", "client_payload": {...}}` to kick off an Action — *or* the commit itself triggers `on: push:` if you'd rather have the workflow react to the commit naturally.
+5. JS polls `GET /repos/statshed/whatever/actions/runs?event=repository_dispatch` to show run status.
+
+If you later want to share this with non-technical users, swap in Option 2 by adding a 50-line Cloudflare Worker that does only the OAuth code exchange — the rest of the app doesn't change.
+
+## Key references
+
+- GitHub REST API CORS support: https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests
+- OAuth web flow CORS limitation (in GitHub's own docs): https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+- `workflow_dispatch` REST endpoint: https://docs.github.com/en/rest/actions/workflows
+- `repository_dispatch` event: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
+- Fine-grained PAT permissions reference: https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens
+- PKCE support changelog (July 2025): https://github.blog/changelog/2025-07-14-pkce-support-for-oauth-and-github-app-authentication/
+- SPA support roadmap (the still-pending real fix): https://github.com/github/roadmap/issues/1153
+- Long-running PKCE/SPA discussion with current GitHub staff status: https://github.com/orgs/community/discussions/15752
+- Octokit auth strategies (useful reading even if you build something simpler): https://github.com/octokit/auth-oauth-device.js

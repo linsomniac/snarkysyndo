@@ -1,0 +1,10 @@
+Let's create a micro-blogging system called "snarksyndo".  It's architecture is going to
+be: the contents is stored in github, each message is a short message which is committed
+to the github repo, and then a github action posts new messages (that have not already
+been posted) to Mastodon and Bluesky (then mark the messages as having been posted.  There
+will be a companion app, which will get published to an associated github.io page, that
+implements the client.  Necessary secrets, like the PAT for github repo access, and the
+github repo location, will be stored in localstorage on the browser.  In short, the user
+will go to a webpage on github.io, type in a message, and click a "post" button, and the
+message will show up on their bluesky and mastodon accounts.  Please ask any clarifying
+questions before beginng work.

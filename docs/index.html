@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- CSP: only fetch to api.github.com; same-origin scripts/styles; no inline,
+     no plugins, no framing. Reduces the blast radius of any XSS that finds
+     its way into a message body. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
 <title>snarkysyndo</title>
 <link rel="stylesheet" href="styles.css">
 </head>

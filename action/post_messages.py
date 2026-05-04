@@ -22,6 +22,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -95,12 +96,42 @@ def _check_response(resp: httpx.Response, platform: str) -> None:
         raise RuntimeError(f"{platform} HTTP {resp.status_code}: {detail}")
 
 
+def normalize_mastodon_instance(value: str) -> str:
+    """Validate MASTODON_INSTANCE and return a bare ``host[:port]``.
+
+    Accepts either a bare hostname (``mastodon.social``) or a full
+    ``https://host`` URL. Rejects ``http://`` (would send the bearer token
+    in plaintext), embedded credentials, query/fragment, and any path
+    other than ``/`` — the README documents host-only.
+    """
+    raw = value.strip()
+    if not raw:
+        raise ValueError("MASTODON_INSTANCE is empty")
+    if raw.lower().startswith("http://"):
+        raise ValueError("MASTODON_INSTANCE must use https, not http")
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"MASTODON_INSTANCE scheme must be https, got {parsed.scheme!r}"
+        )
+    if parsed.username or parsed.password:
+        raise ValueError("MASTODON_INSTANCE must not contain credentials")
+    if parsed.path not in ("", "/"):
+        raise ValueError(
+            f"MASTODON_INSTANCE must be host-only, got path {parsed.path!r}"
+        )
+    if parsed.query or parsed.fragment:
+        raise ValueError("MASTODON_INSTANCE must not have query or fragment")
+    if not parsed.hostname:
+        raise ValueError("MASTODON_INSTANCE has no hostname")
+    return parsed.netloc
+
+
 def post_to_mastodon(*, instance: str, token: str, body: str) -> str:
-    base = instance.strip().rstrip("/")
-    if not base.startswith("http"):
-        base = f"https://{base}"
+    # ``instance`` here is already validated (see normalize_mastodon_instance);
+    # the scheme is fixed to https so the token never leaves a TLS connection.
     resp = httpx.post(
-        f"{base}/api/v1/statuses",
+        f"https://{instance}/api/v1/statuses",
         headers={"Authorization": f"Bearer {token}"},
         json={"status": body},
         timeout=30.0,
@@ -155,6 +186,13 @@ def main() -> int:
 
     have_mastodon = bool(mastodon_instance and mastodon_token)
     have_bluesky = bool(bluesky_handle and bluesky_password)
+
+    if have_mastodon:
+        try:
+            mastodon_instance = normalize_mastodon_instance(mastodon_instance)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
 
     if not (have_mastodon or have_bluesky):
         print(

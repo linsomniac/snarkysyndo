@@ -146,6 +146,19 @@ uv run action/post_messages.py
   exposed to the browser client.
 - The action's commits include `[skip ci]` so its status updates do not
   re-trigger the workflow.
+- The client ships a strict Content Security Policy (`connect-src` is
+  pinned to `api.github.com`) and refuses to render non-`https:` links
+  from message frontmatter, so a corrupted or hostile message file
+  cannot navigate the page to a `javascript:` URI.
+- **Shared-origin caveat:** every site under `https://<your-user>.github.io/`
+  shares the same browser origin and therefore the same localStorage. If
+  you publish *any* other GitHub Pages site under the same user, that
+  site can read this PAT. Mitigations, in order of preference:
+  1. Don't publish other Pages sites under the same user account, or
+  2. Serve snarkysyndo from a custom domain (Pages → Custom domain) so
+     it gets its own origin, or
+  3. Click **Forget** in Settings after each session — re-pasting the
+     PAT each time eliminates persistent storage at the cost of UX.
 
 ## Limitations (v1)
 

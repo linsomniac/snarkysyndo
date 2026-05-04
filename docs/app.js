@@ -48,9 +48,13 @@ function ghHeaders(extra = {}) {
 }
 
 async function ghFetch(path, opts = {}) {
-  const url = path.startsWith('http')
-    ? path
-    : `https://api.github.com${path}`;
+  // AIDEV-NOTE: keep this strictly api.github.com — ghHeaders() always
+  // attaches the PAT, so accepting an arbitrary URL here would let any
+  // future caller leak the token to a different origin.
+  if (typeof path !== 'string' || !path.startsWith('/')) {
+    throw new Error('ghFetch requires a path beginning with "/"');
+  }
+  const url = `https://api.github.com${path}`;
   const resp = await fetch(url, {
     ...opts,
     headers: ghHeaders(opts.headers || {}),
@@ -250,6 +254,19 @@ function classify(fm) {
   return 'pending';
 }
 
+function safeHref(url) {
+  // Reject anything that isn't a valid https URL — keeps a hostile or
+  // corrupted frontmatter (e.g. javascript:...) from running in this
+  // origin when a timeline entry is clicked.
+  if (typeof url !== 'string') return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function relativeTime(iso) {
   if (!iso) return '';
   const then = new Date(iso).getTime();
@@ -316,19 +333,21 @@ function renderTimeline(messages) {
     time.textContent = relativeTime(m.fm.created_at);
     footer.appendChild(time);
 
-    if (m.fm.mastodon_url) {
+    const masto = safeHref(m.fm.mastodon_url);
+    if (masto) {
       const a = document.createElement('a');
-      a.href = m.fm.mastodon_url;
+      a.href = masto;
       a.target = '_blank';
-      a.rel = 'noopener';
+      a.rel = 'noopener noreferrer';
       a.textContent = 'Mastodon';
       footer.appendChild(a);
     }
-    if (m.fm.bluesky_url) {
+    const bsky = safeHref(m.fm.bluesky_url);
+    if (bsky) {
       const a = document.createElement('a');
-      a.href = m.fm.bluesky_url;
+      a.href = bsky;
       a.target = '_blank';
-      a.rel = 'noopener';
+      a.rel = 'noopener noreferrer';
       a.textContent = 'Bluesky';
       footer.appendChild(a);
     }

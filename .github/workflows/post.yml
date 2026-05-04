@@ -50,4 +50,20 @@ jobs:
           git config user.email "snarkysyndo-bot@users.noreply.github.com"
           git add messages/
           git commit -m "Update post status [skip ci]"
-          git push
+          # AIDEV-NOTE: external pushes (a new compose) may land between
+          # the run start and now. Posts already happened at that point,
+          # so we MUST get the status commit through — otherwise the next
+          # run sees the message as pending and double-posts. Rebase and
+          # retry rather than failing.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "push attempt $attempt failed; fetching and rebasing"
+            git fetch origin "$GITHUB_REF_NAME"
+            git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+            sleep $((attempt * 2))
+          done
+          echo "ERROR: failed to push status updates after 5 attempts" >&2
+          exit 1
